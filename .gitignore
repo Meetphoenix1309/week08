@@ -201,6 +201,6 @@ terraform/.terraform/
 terraform/*.tfstate
 terraform/*.tfstate.backup
 terraform/terraform.tfvars
-aks-kubeconfig.yaml
+terraform/aks-kubeconfig.yaml
 terraform/terraform.tfstate
 terraform/terraform.tfstate.backup
