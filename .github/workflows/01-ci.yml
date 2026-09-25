@@ -146,7 +146,7 @@ jobs:
 
 
   # =========================================================
-  # Build and Push Docker Images
+  # Build, Scan and Push Docker Images
   # =========================================================
   build-and-push:
     name: Build and Push ${{ matrix.image }}
@@ -206,6 +206,39 @@ jobs:
             --platform linux/amd64 \
             -t ${{ vars.ACR_LOGIN_SERVER }}/${{ matrix.image }}:${{ github.sha }} \
             ./${{ matrix.service }}
+
+      # -----------------------------------------------------
+      # Docker Scout vulnerability scan
+      # -----------------------------------------------------
+      # Runs after the image is built but BEFORE it is pushed to ACR, so
+      # scan results are available for every image on every CI run without
+      # ever gating the push on them. Docker Scout itself is tied to a
+      # Docker Hub account (separate from ACR), so a short-lived, read-only
+      # Docker Hub login is required purely to authorise the scan -- this
+      # has no relationship to where the image is actually stored.
+      #
+      # exit-code is left false (report-only) rather than failing the
+      # build on High/Critical findings: several of the base Python images
+      # shared across all six services currently carry known, still-being-
+      # patched-upstream CVEs (see Task 10.1P), so a hard gate here would
+      # block every build until every upstream dependency catches up. The
+      # scan output is still produced and reviewed every run, which is the
+      # DevSecOps value -- continuous visibility -- without turning a
+      # known, tracked issue into a blanket pipeline outage.
+      - name: Login to Docker Hub (required for Docker Scout)
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Docker Scout - vulnerability scan
+        uses: docker/scout-action@v1
+        with:
+          command: cves,recommendations
+          image: ${{ vars.ACR_LOGIN_SERVER }}/${{ matrix.image }}:${{ github.sha }}
+          only-severities: critical,high
+          exit-code: false
+          summary: true
 
       - name: Push Docker image with commit SHA
         run: |
