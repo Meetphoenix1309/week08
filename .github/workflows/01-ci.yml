@@ -13,6 +13,49 @@ on:
 jobs:
 
   # =========================================================
+  # Terraform Validate (Infrastructure as Code check)
+  # =========================================================
+  # Runs independently of the test/build jobs, since it validates the
+  # Terraform *configuration* (syntax, internal consistency, provider
+  # schema correctness) rather than anything about the application code.
+  #
+  # NOTE: this deliberately uses `terraform validate` only, not `plan` or
+  # `apply`. This CloudLabs Azure tenant blocks self-service Microsoft
+  # Entra app/service-principal registration (see notes in
+  # 02-deploy-staging.yml and 04-deploy-production.yml), so there is no
+  # way to give a GitHub Actions runner its own Azure credentials here.
+  # `terraform validate` needs no cloud authentication at all -- it only
+  # checks the configuration itself -- so it is the IaC stage that can
+  # actually run in this environment. Real `plan`/`apply` against Azure
+  # is still performed locally, where interactive Azure login is possible.
+  terraform-validate:
+    name: Terraform Validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform format check
+        working-directory: terraform
+        run: terraform fmt -check -recursive
+        continue-on-error: true
+
+      - name: Terraform init (no backend, no cloud auth required)
+        working-directory: terraform
+        run: terraform init -backend=false
+
+      - name: Terraform validate
+        working-directory: terraform
+        run: terraform validate
+
+
+  # =========================================================
   # Backend Tests
   # =========================================================
   backend-test:
