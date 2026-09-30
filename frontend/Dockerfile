@@ -24,6 +24,15 @@ RUN npm run build
 
 FROM nginx:1.27-alpine
 
+# Security remediation (Task 10.2D): Docker Scout flagged critical/high CVEs
+# in curl, openssl, libxml2 and expat -- Alpine OS packages baked into the
+# upstream nginx:1.27-alpine image, not anything this app uses directly
+# (nginx only serves the static build output). Rather than waiting for
+# Docker Hub to rebuild the base image, pull the latest patched package
+# versions from Alpine's own repositories at build time. --no-cache avoids
+# leaving the apk index cached in the image layer.
+RUN apk update && apk upgrade --no-cache
+
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 COPY --from=build /app/dist /usr/share/nginx/html
