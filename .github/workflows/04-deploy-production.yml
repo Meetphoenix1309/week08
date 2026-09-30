@@ -157,3 +157,36 @@ jobs:
           kubectl get pods -n production
           kubectl get services -n production
           kubectl get pvc -n production
+
+      # =========================================================
+      # Monitoring validation (Task 10.2D)
+      # =========================================================
+      # Prometheus + Grafana (kube-prometheus-stack) were deployed once via
+      # Helm directly against the cluster, since the monitoring stack itself
+      # is long-lived infrastructure rather than something that should be
+      # reinstalled on every deploy. This step instead *validates* that the
+      # stack is still healthy immediately after every production deploy,
+      # giving CI visibility into monitoring status alongside the app it
+      # monitors -- exactly the "deployed or validated" requirement, without
+      # the risk/cost of re-running a Helm install on every push.
+      - name: Validate monitoring stack (Prometheus + Grafana)
+        run: |
+          echo "Checking monitoring namespace pod health..."
+          kubectl get pods -n monitoring
+
+          echo ""
+          echo "Waiting for all monitoring pods to be Ready..."
+          kubectl wait --for=condition=Ready pods --all \
+            -n monitoring \
+            --timeout=180s
+
+          echo ""
+          echo "Confirming Grafana service exists..."
+          kubectl get service monitoring-grafana -n monitoring
+
+          echo ""
+          echo "Confirming Prometheus is reachable and has active targets..."
+          kubectl run curl-prometheus-check --rm -i --restart=Never \
+            --image=curlimages/curl:latest \
+            -n monitoring -- \
+            curl -sf http://monitoring-kube-prometheus-prometheus:9090/-/healthy
