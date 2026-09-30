@@ -9,6 +9,13 @@ on:
   # Manual trigger for the workflow
   workflow_dispatch:
 
+# Required so azure/login can request an OIDC token from GitHub and exchange
+# it for an Azure access token via the sit722-gha-id federated identity
+# credential (see terraform-plan job below). Without id-token: write, the
+# OIDC handshake fails before it even reaches Azure.
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
 
@@ -20,14 +27,11 @@ jobs:
   # schema correctness) rather than anything about the application code.
   #
   # NOTE: this deliberately uses `terraform validate` only, not `plan` or
-  # `apply`. This CloudLabs Azure tenant blocks self-service Microsoft
-  # Entra app/service-principal registration (see notes in
-  # 02-deploy-staging.yml and 04-deploy-production.yml), so there is no
-  # way to give a GitHub Actions runner its own Azure credentials here.
-  # `terraform validate` needs no cloud authentication at all -- it only
-  # checks the configuration itself -- so it is the IaC stage that can
-  # actually run in this environment. Real `plan`/`apply` against Azure
-  # is still performed locally, where interactive Azure login is possible.
+  # `apply`, and never authenticates to Azure. It checks the *configuration*
+  # (syntax, internal consistency, provider schema) so it runs fast and
+  # fails early even if Azure auth or the terraform-plan job below has an
+  # issue. The real, authenticated `plan` against Azure runs immediately
+  # after in the terraform-plan job, via the sit722-gha-id OIDC identity.
   terraform-validate:
     name: Terraform Validate
     runs-on: ubuntu-latest
@@ -53,6 +57,67 @@ jobs:
       - name: Terraform validate
         working-directory: terraform
         run: terraform validate
+
+
+  # =========================================================
+  # Terraform Plan (real Azure execution, Task 10.2D)
+  # =========================================================
+  # Unlike terraform-validate above (config-only, no cloud auth), this job
+  # actually authenticates to Azure and runs `terraform plan` against the
+  # live tfstate-rg backend and real subscription. This was previously done
+  # only from a local machine because this CloudLabs Azure tenant blocks
+  # self-service Entra *application* registration -- but a *user-assigned
+  # managed identity* with a federated (OIDC) credential is not blocked, and
+  # one (`sit722-gha-id`) was created for exactly this purpose. GitHub's
+  # OIDC token is exchanged for a short-lived Azure access token at run
+  # time, so no long-lived Azure secret is ever stored in the repo.
+  #
+  # This deliberately runs `plan` only, not `apply`. Plan is sufficient to
+  # demonstrate that Terraform authenticates and executes correctly inside
+  # the pipeline (the Task 10.2D requirement), while keeping infrastructure
+  # changes to the live AKS cluster a reviewed, deliberate action rather
+  # than something that fires unattended on every push to main.
+  terraform-plan:
+    name: Terraform Plan (Azure)
+    runs-on: ubuntu-latest
+    needs:
+      - terraform-validate
+
+    # These let both the azurerm *backend* (state storage) and the azurerm
+    # *provider* (resource management) authenticate via OIDC natively,
+    # independently of the az CLI session azure/login sets up below. This
+    # is the auth path HashiCorp documents for GitHub Actions + Azure OIDC,
+    # and avoids relying on az CLI credential passthrough for `terraform
+    # init`/`plan`.
+    env:
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      ARM_USE_OIDC: true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Azure login (OIDC via sit722-gha-id federated identity)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform init (real backend)
+        working-directory: terraform
+        run: terraform init
+
+      - name: Terraform plan
+        working-directory: terraform
+        run: terraform plan -input=false
 
 
   # =========================================================
