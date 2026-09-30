@@ -94,6 +94,12 @@ jobs:
       ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       ARM_USE_OIDC: true
+      # variables.tf's "prefix" variable has no default (it must be
+      # globally unique per student) and is normally supplied via a local,
+      # untracked terraform.tfvars file. TF_VAR_<name> is Terraform's
+      # standard way to supply the same value as an environment variable
+      # in CI, where no tfvars file exists.
+      TF_VAR_prefix: sw0822511
 
     steps:
       - name: Checkout repository
